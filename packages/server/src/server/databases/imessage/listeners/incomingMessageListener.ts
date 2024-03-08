@@ -7,7 +7,9 @@ import { isMinVentura } from "@server/env";
 export class IncomingMessageListener extends MessageChangeListener {
     async getEntries(after: Date, before: Date): Promise<void> {
         await this.emitNewMessages(after);
-        await this.emitUpdatedMessages(after);
+
+        const afterUpdateOffsetDate = new Date(after.getTime() - this.pollFrequency - 15000);
+        await this.emitUpdatedMessages(afterUpdateOffsetDate);
     }
 
     async emitNewMessages(after: Date) {
@@ -56,28 +58,16 @@ export class IncomingMessageListener extends MessageChangeListener {
         // Exit early to prevent over processing.
         if (!isMinVentura) return;
 
-        const where: DBWhereItem[] = [
-            {
-                statement: "message.is_from_me = :fromMe",
-                args: { fromMe: 0 }
-            }
-        ];
-
-        // If we have a last row id, only get messages after that
-        if (this.lastRowId !== 0) {
-            where.push({
-                statement: "message.ROWID > :rowId",
-                args: { rowId: this.lastRowId }
-            });
-        }
-
-        // Do not use the "after" parameter if we have a last row id
-        // Offset 15 seconds to account for the "Apple" delay
+        // Get updated entries from myself only
         const entries = await this.repo.getUpdatedMessages({
-            after: this.lastRowId === 0 ? new Date(after.getTime() - 15000) : null,
+            after,
             withChats: true,
-            where,
-            orderBy: this.lastRowId === 0 ? "message.dateCreated" : "message.ROWID"
+            where: [
+                {
+                    statement: "message.is_from_me = :isFromMe",
+                    args: { isFromMe: 0 }
+                }
+            ]
         });
 
         // Emit the new message
